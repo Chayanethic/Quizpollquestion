@@ -1,0 +1,615 @@
+<script type="text/javascript">
+        var gk_isXlsx = false;
+        var gk_xlsxFileLookup = {};
+        var gk_fileData = {};
+        function filledCell(cell) {
+          return cell !== '' && cell != null;
+        }
+        function loadFileData(filename) {
+        if (gk_isXlsx && gk_xlsxFileLookup[filename]) {
+            try {
+                var workbook = XLSX.read(gk_fileData[filename], { type: 'base64' });
+                var firstSheetName = workbook.SheetNames[0];
+                var worksheet = workbook.Sheets[firstSheetName];
+
+                // Convert sheet to JSON to filter blank rows
+                var jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1, blankrows: false, defval: '' });
+                // Filter out blank rows (rows where all cells are empty, null, or undefined)
+                var filteredData = jsonData.filter(row => row.some(filledCell));
+
+                // Heuristic to find the header row by ignoring rows with fewer filled cells than the next row
+                var headerRowIndex = filteredData.findIndex((row, index) =>
+                  row.filter(filledCell).length >= filteredData[index + 1]?.filter(filledCell).length
+                );
+                // Fallback
+                if (headerRowIndex === -1 || headerRowIndex > 25) {
+                  headerRowIndex = 0;
+                }
+
+                // Convert filtered JSON back to CSV
+                var csv = XLSX.utils.aoa_to_sheet(filteredData.slice(headerRowIndex)); // Create a new sheet from filtered array of arrays
+                csv = XLSX.utils.sheet_to_csv(csv, { header: 1 });
+                return csv;
+            } catch (e) {
+                console.error(e);
+                return "";
+            }
+        }
+        return gk_fileData[filename] || "";
+        }
+        </script><!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>QuizMaster</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        .fade-in { animation: fadeIn 0.5s ease-in; }
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+        .hover-scale { transition: transform 0.2s, background-color 0.2s; }
+        .hover-scale:hover { transform: scale(1.05); }
+        .error-message { color: #dc2626; font-size: 0.875rem; }
+        .card { background: linear-gradient(145deg, #ffffff, #f1f5f9); box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1); }
+        .btn-primary { background: #2563eb; }
+        .btn-primary:hover { background: #1e40af; }
+        .btn-secondary { background: #9333ea; }
+        .btn-secondary:hover { background: #7e22ce; }
+        .btn-danger { background: #dc2626; }
+        .btn-danger:hover { background: #b91c1c; }
+        .footer-link { transition: color 0.2s; }
+        .footer-link:hover { color: #1e40af; }
+    </style>
+</head>
+<body class="bg-gray-100 min-h-screen flex flex-col items-center justify-center p-4">
+    <div id="app" class="w-full max-w-3xl card rounded-2xl p-8">
+        <!-- Admin Login -->
+        <div id="admin-login" class="space-y-6 fade-in">
+            <h1 class="text-4xl font-extrabold text-gray-800 text-center">Teacher Portal</h1>
+            <input id="admin-name" type="text" placeholder="Enter Teacher Name" class="w-full p-4 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-600 transition">
+            <p id="admin-error" class="error-message hidden"></p>
+            <button onclick="createRoom()" class="w-full btn-primary text-white p-4 rounded-lg hover-scale font-semibold">Create Quiz Room</button>
+        </div>
+
+        <!-- Student Login -->
+        <div id="student-login" class="space-y-6 fade-in">
+            <h1 class="text-4xl font-extrabold text-gray-800 text-center">Join Quiz</h1>
+            <input id="student-name" type="text" placeholder="Enter Your Name" class="w-full p-4 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-600 transition">
+            <input id="room-code" type="text" placeholder="Enter Room Code" class="w-full p-4 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-600 transition">
+            <p id="student-error" class="error-message hidden"></p>
+            <button onclick="joinRoom()" class="w-full bg-green-600 text-white p-4 rounded-lg hover:bg-green-700 hover-scale font-semibold">Join Room</button>
+        </div>
+
+        <!-- Admin Dashboard -->
+        <div id="admin-dashboard" class="space-y-6 hidden fade-in">
+            <h1 class="text-4xl font-extrabold text-gray-800 text-center">Teacher Dashboard</h1>
+            <div class="text-center bg-blue-50 p-6 rounded-lg shadow-inner">
+                <p id="room-code-display" class="text-xl font-semibold text-blue-800"></p>
+                <input id="shareable-url" type="text" readonly class="w-full p-4 mt-2 border border-gray-300 rounded-lg bg-gray-100 text-gray-600 cursor-pointer font-mono" onclick="this.select(); navigator.clipboard.writeText(this.value).then(() => alert('URL copied to clipboard!'))">
+            </div>
+            <div id="question-form" class="space-y-4 bg-gray-50 p-6 rounded-lg shadow-inner">
+                <input id="question-text" type="text" placeholder="Enter Question" class="w-full p-4 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-600 transition">
+                <select id="question-type" onchange="toggleOptions()" class="w-full p-4 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-600 transition">
+                    <option value="multiple-choice">Multiple Choice</option>
+                    <option value="numeric">Numeric Answer</option>
+                </select>
+                <div id="options-container" class="space-y-3">
+                    <input id="option1" type="text" placeholder="Option 1" class="w-full p-4 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-600 transition">
+                    <input id="option2" type="text" placeholder="Option 2" class="w-full p-4 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-600 transition">
+                    <input id="option3" type="text" placeholder="Option 3" class="w-full p-4 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-600 transition">
+                    <input id="option4" type="text" placeholder="Option 4" class="w-full p-4 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-600 transition">
+                    <select id="correct-answer-mcq" class="w-full p-4 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-600 transition">
+                        <option value="">Select Correct Answer</option>
+                    </select>
+                </div>
+                <input id="numeric-answer-correct" type="number" placeholder="Correct Numeric Answer (optional)" class="w-full p-4 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-600 transition hidden">
+                <input id="question-image" type="file" accept="image/*" class="w-full p-4 border border-gray-300 rounded-lg">
+                <input id="timer" type="number" placeholder="Timer (seconds, min 10)" min="10" class="w-full p-4 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-600 transition">
+                <p id="question-error" class="error-message hidden"></p>
+                <button onclick="startPoll()" class="w-full btn-primary text-white p-4 rounded-lg hover-scale font-semibold">Start Poll</button>
+            </div>
+            <div class="flex space-x-4">
+                <button onclick="showLeaderboard()" class="flex-1 btn-secondary text-white p-4 rounded-lg hover-scale font-semibold">View Leaderboard</button>
+                <button onclick="endRoom()" class="flex-1 btn-danger text-white p-4 rounded-lg hover-scale font-semibold">End Room</button>
+            </div>
+        </div>
+
+        <!-- Student Dashboard -->
+        <div id="student-dashboard" class="space-y-6 hidden fade-in">
+            <h1 class="text-4xl font-extrabold text-gray-800 text-center">Student Dashboard</h1>
+            <div class="bg-gray-50 p-6 rounded-lg shadow-inner">
+                <p id="current-question" class="text-xl font-medium text-gray-800"></p>
+                <img id="question-image-display" class="max-w-full h-auto mt-4 rounded-lg hidden" alt="Question Image">
+                <div id="answer-options" class="space-y-3 mt-4"></div>
+                <input id="numeric-answer" type="number" placeholder="Enter Numeric Answer" class="w-full p-4 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-600 transition hidden">
+                <p id="answer-error" class="error-message hidden"></p>
+                <p id="timer-display" class="text-center text-red-600 font-semibold text-lg mt-4"></p>
+                <button onclick="submitAnswer()" class="w-full bg-green-600 text-white p-4 rounded-lg hover:bg-green-700 hover-scale font-semibold hidden" id="submit-answer">Submit Answer</button>
+            </div>
+            <button onclick="showLeaderboard()" class="w-full btn-secondary text-white p-4 rounded-lg hover-scale font-semibold">View Leaderboard</button>
+        </div>
+
+        <!-- Leaderboard -->
+        <div id="leaderboard" class="space-y-6 hidden fade-in">
+            <h1 class="text-4xl font-extrabold text-gray-800 text-center">Leaderboard</h1>
+            <div id="leaderboard-content" class="bg-gray-50 p-6 rounded-lg shadow-inner"></div>
+            <button onclick="backToDashboard()" class="w-full btn-primary text-white p-4 rounded-lg hover-scale font-semibold">Back to Dashboard</button>
+        </div>
+    </div>
+    <footer class="mt-8 text-center text-gray-600">
+        <p>Powered by <a href="https://smartQAI.vercel.app" target="_blank" class="footer-link text-blue-600 font-semibold">smartQAI</a></p>
+    </footer>
+
+    <script>
+        let room = null;
+        let isAdmin = false;
+        let currentUser = null;
+        let ws = null;
+        let reconnectAttempts = 0;
+        let pollingInterval = null;
+        const maxReconnectAttempts = 5;
+        const wsProtocol = window.location.protocol === 'https:' ? 'wss://' : 'ws://';
+
+        function connectWebSocket(roomCode, user, isAdminFlag) {
+            try {
+                ws = new WebSocket(`${wsProtocol}${window.location.host}`);
+                ws.onopen = () => {
+                    reconnectAttempts = 0;
+                    ws.send(JSON.stringify({ type: 'join', roomCode, user, isAdmin: isAdminFlag }));
+                    console.log('WebSocket connected');
+                    if (pollingInterval) {
+                        clearInterval(pollingInterval);
+                        pollingInterval = null;
+                    }
+                };
+                ws.onmessage = (event) => {
+                    try {
+                        const data = JSON.parse(event.data);
+                        if (data.type === 'poll') {
+                            room.currentQuestion = data.question;
+                            updateStudentDashboard();
+                        } else if (data.type === 'timer') {
+                            room.timer = data.timer;
+                            updateTimerDisplay();
+                        } else if (data.type === 'end') {
+                            room = null;
+                            ws.close();
+                            window.location.search = '';
+                            showLogin();
+                            alert('Room has been closed by the teacher');
+                        } else if (data.type === 'update') {
+                            room = data.room;
+                            if (!isAdmin) updateStudentDashboard();
+                        }
+                    } catch (err) {
+                        console.error('WebSocket message parsing error:', err.message);
+                    }
+                };
+                ws.onclose = () => {
+                    console.log('WebSocket closed');
+                    if (room && reconnectAttempts < maxReconnectAttempts) {
+                        reconnectAttempts++;
+                        console.log(`Reconnecting WebSocket, attempt ${reconnectAttempts}`);
+                        setTimeout(() => connectWebSocket(roomCode, user, isAdminFlag), 1000 * reconnectAttempts);
+                    } else if (room) {
+                        console.log('Starting HTTP polling fallback');
+                        startPolling(roomCode);
+                    }
+                };
+                ws.onerror = (err) => {
+                    console.error('WebSocket error:', err.message);
+                    ws.close();
+                };
+            } catch (err) {
+                console.error('WebSocket connection error:', err.message);
+                startPolling(roomCode);
+            }
+        }
+
+        function startPolling(roomCode) {
+            if (pollingInterval) return;
+            pollingInterval = setInterval(async () => {
+                try {
+                    const response = await fetch(`/room/${roomCode}`);
+                    if (!response.ok) throw new Error('Room not found');
+                    room = await response.json();
+                    if (!isAdmin) updateStudentDashboard();
+                } catch (err) {
+                    console.error('Polling error:', err.message);
+                    clearInterval(pollingInterval);
+                    pollingInterval = null;
+                    alert('Connection lost. Please rejoin the room.');
+                    showLogin();
+                    room = null;
+                }
+            }, 5000);
+        }
+
+        async function createRoom() {
+            const adminName = document.getElementById('admin-name').value.trim();
+            const errorEl = document.getElementById('admin-error');
+            if (!adminName) {
+                errorEl.textContent = 'Please enter a teacher name';
+                errorEl.classList.remove('hidden');
+                return;
+            }
+            errorEl.classList.add('hidden');
+            try {
+                const response = await fetch('/create-room', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ adminName })
+                });
+                const data = await response.json();
+                if (data.error) {
+                    errorEl.textContent = data.error;
+                    errorEl.classList.remove('hidden');
+                    return;
+                }
+                isAdmin = true;
+                currentUser = adminName;
+                room = { code: data.roomCode };
+                connectWebSocket(data.roomCode, adminName, true);
+                showAdminDashboard();
+            } catch (err) {
+                errorEl.textContent = 'Failed to connect to server. Please try again.';
+                errorEl.classList.remove('hidden');
+                console.error('Create room error:', err.message);
+            }
+        }
+
+        async function joinRoom() {
+            const studentName = document.getElementById('student-name').value.trim();
+            const roomCode = document.getElementById('room-code').value.trim().toUpperCase();
+            const errorEl = document.getElementById('student-error');
+            if (!studentName || !roomCode) {
+                errorEl.textContent = 'Please enter both name and room code';
+                errorEl.classList.remove('hidden');
+                return;
+            }
+            errorEl.classList.add('hidden');
+            try {
+                const response = await fetch('/join-room', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ roomCode, studentName })
+                });
+                const data = await response.json();
+                if (data.error) {
+                    errorEl.textContent = data.error;
+                    errorEl.classList.remove('hidden');
+                    return;
+                }
+                currentUser = studentName;
+                room = { code: roomCode };
+                connectWebSocket(roomCode, studentName, false);
+                await fetchRoomData(roomCode);
+                showStudentDashboard();
+            } catch (err) {
+                errorEl.textContent = 'Failed to connect to server. Please try again.';
+                errorEl.classList.remove('hidden');
+                console.error('Join room error:', err.message);
+            }
+        }
+
+        async function fetchRoomData(roomCode) {
+            try {
+                const response = await fetch(`/room/${roomCode}`);
+                if (!response.ok) throw new Error('Room not found');
+                room = await response.json();
+                updateStudentDashboard();
+            } catch (err) {
+                alert('Failed to fetch room data. Please rejoin.');
+                showLogin();
+                console.error('Fetch room data error:', err.message);
+            }
+        }
+
+        function toggleOptions() {
+            const questionType = document.getElementById('question-type').value;
+            const optionsContainer = document.getElementById('options-container');
+            const numericAnswerCorrect = document.getElementById('numeric-answer-correct');
+            const correctAnswerMcq = document.getElementById('correct-answer-mcq');
+            optionsContainer.classList.toggle('hidden', questionType === 'numeric');
+            numericAnswerCorrect.classList.toggle('hidden', questionType !== 'numeric');
+            updateCorrectAnswerOptions();
+        }
+
+        function updateCorrectAnswerOptions() {
+            const correctAnswerMcq = document.getElementById('correct-answer-mcq');
+            const options = [
+                document.getElementById('option1').value.trim(),
+                document.getElementById('option2').value.trim(),
+                document.getElementById('option3').value.trim(),
+                document.getElementById('option4').value.trim()
+            ].filter(opt => opt);
+            correctAnswerMcq.innerHTML = '<option value="">Select Correct Answer</option>' + 
+                options.map(opt => `<option value="${opt}">${opt}</option>`).join('');
+        }
+
+        async function startPoll() {
+            const questionText = document.getElementById('question-text').value.trim();
+            const questionType = document.getElementById('question-type').value;
+            const timer = parseInt(document.getElementById('timer').value);
+            const errorEl = document.getElementById('question-error');
+            if (!questionText || !timer || timer < 10) {
+                errorEl.textContent = 'Please enter a question and timer (min 10s)';
+                errorEl.classList.remove('hidden');
+                return;
+            }
+
+            let options = [];
+            let correctAnswer = null;
+            if (questionType === 'multiple-choice') {
+                options = [
+                    document.getElementById('option1').value.trim(),
+                    document.getElementById('option2').value.trim(),
+                    document.getElementById('option3').value.trim(),
+                    document.getElementById('option4').value.trim()
+                ].filter(opt => opt);
+                if (options.length < 2) {
+                    errorEl.textContent = 'Please provide at least 2 options';
+                    errorEl.classList.remove('hidden');
+                    return;
+                }
+                correctAnswer = document.getElementById('correct-answer-mcq').value;
+            } else {
+                correctAnswer = document.getElementById('numeric-answer-correct').value.trim();
+            }
+            errorEl.classList.add('hidden');
+
+            const imageFile = document.getElementById('question-image').files[0];
+            let imageData = null;
+            if (imageFile) {
+                try {
+                    imageData = await new Promise((resolve) => {
+                        const reader = new FileReader();
+                        reader.onload = (e) => resolve(e.target.result);
+                        reader.readAsDataURL(imageFile);
+                    });
+                } catch (err) {
+                    errorEl.textContent = 'Failed to read image. Please try again.';
+                    errorEl.classList.remove('hidden');
+                    console.error('Image read error:', err.message);
+                    return;
+                }
+            }
+
+            sendPoll(questionText, questionType, options, timer, imageData, correctAnswer);
+            // Reset form
+            document.getElementById('question-text').value = '';
+            document.getElementById('option1').value = '';
+            document.getElementById('option2').value = '';
+            document.getElementById('option3').value = '';
+            document.getElementById('option4').value = '';
+            document.getElementById('numeric-answer-correct').value = '';
+            document.getElementById('correct-answer-mcq').value = '';
+            document.getElementById('question-image').value = '';
+            document.getElementById('timer').value = '';
+        }
+
+        function sendPoll(questionText, questionType, options, timer, imageData, correctAnswer) {
+            if (!ws || ws.readyState !== WebSocket.OPEN) {
+                alert('Connection lost. Please refresh and rejoin.');
+                return;
+            }
+            const question = {
+                text: questionText,
+                type: questionType,
+                options: options,
+                image: imageData,
+                timer: timer,
+                correctAnswer: correctAnswer,
+                responses: {}
+            };
+            ws.send(JSON.stringify({ type: 'poll', roomCode: room.code, question }));
+        }
+
+        function updateTimerDisplay() {
+            const timerDisplay = document.getElementById('timer-display');
+            if (room && room.timer > 0) {
+                timerDisplay.textContent = `Time Left: ${room.timer}s`;
+            } else {
+                timerDisplay.textContent = '';
+            }
+        }
+
+        function submitAnswer() {
+            if (!room || !room.currentQuestion) {
+                document.getElementById('answer-error').textContent = 'No active question';
+                document.getElementById('answer-error').classList.remove('hidden');
+                return;
+            }
+            const answer = room.currentQuestion.type === 'numeric' ?
+                document.getElementById('numeric-answer').value.trim() :
+                document.querySelector('input[name="answer"]:checked')?.value;
+            const errorEl = document.getElementById('answer-error');
+            if (!answer) {
+                errorEl.textContent = 'Please select or enter an answer';
+                errorEl.classList.remove('hidden');
+                return;
+            }
+            errorEl.classList.add('hidden');
+            if (!ws || ws.readyState !== WebSocket.OPEN) {
+                errorEl.textContent = 'Connection lost. Please rejoin.';
+                errorEl.classList.remove('hidden');
+                return;
+            }
+            ws.send(JSON.stringify({ type: 'answer', roomCode: room.code, user: currentUser, answer }));
+            document.getElementById('numeric-answer').value = '';
+            document.querySelectorAll('input[name="answer"]').forEach(input => input.checked = false);
+            alert('Answer submitted!');
+        }
+
+        async function showLeaderboard() {
+            try {
+                await fetchRoomData(room.code);
+                const leaderboard = document.getElementById('leaderboard-content');
+                let html = '<h2 class="text-2xl font-semibold text-gray-800 mb-4">Results</h2>';
+                
+                // Student Scores and Ranking
+                const students = Object.entries(room.students).map(([name, data]) => ({
+                    name,
+                    score: data.score || 0
+                })).sort((a, b) => b.score - a.score);
+                html += '<div class="mb-6"><h3 class="text-lg font-medium text-gray-700">Student Rankings</h3>';
+                html += '<table class="w-full border-collapse mt-2"><thead><tr class="bg-gray-200"><th class="p-2 text-left">Rank</th><th class="p-2 text-left">Name</th><th class="p-2 text-left">Score</th></tr></thead><tbody>';
+                students.forEach((student, index) => {
+                    const isCurrentUser = student.name === currentUser;
+                    html += `<tr class="${isCurrentUser ? 'bg-blue-100' : ''}"><td class="p-2">${index + 1}</td><td class="p-2">${student.name}${isCurrentUser ? ' (You)' : ''}</td><td class="p-2">${student.score}</td></tr>`;
+                });
+                html += '</tbody></table></div>';
+
+                // Question Results
+                if (!room.questions || room.questions.length === 0) {
+                    html += '<p class="text-gray-600">No questions have been asked yet.</p>';
+                } else {
+                    room.questions.forEach((q, index) => {
+                        html += `<p class="font-medium text-gray-700 mt-4">Question ${index + 1}: ${q.text}</p>`;
+                        if (q.image) {
+                            html += `<img src="${q.image}" class="max-w-full h-auto mt-2 rounded-lg" alt="Question Image">`;
+                        }
+                        if (q.type === 'multiple-choice') {
+                            const total = Object.keys(q.responses).length;
+                            html += `<p class="text-gray-600">Correct Answer: ${q.correctAnswer || 'Not provided'}</p>`;
+                            q.options.forEach(opt => {
+                                const count = Object.values(q.responses).filter(res => res === opt).length;
+                                const percentage = total ? ((count / total) * 100).toFixed(2) : 0;
+                                html += `<p class="text-gray-600">${opt}: ${count} (${percentage}%)</p>`;
+                            });
+                        } else {
+                            html += `<p class="text-gray-600">Correct Answer: ${q.correctAnswer || 'Not provided'}</p>`;
+                            html += '<ul class="list-disc pl-5">';
+                            for (const [student, answer] of Object.entries(q.responses)) {
+                                const isCorrect = q.correctAnswer && answer === q.correctAnswer;
+                                html += `<li class="text-gray-600">${student}: ${answer} ${isCorrect ? '<span class="text-green-600">(Correct)</span>' : ''}</li>`;
+                            }
+                            html += '</ul>';
+                        }
+                    });
+                }
+                leaderboard.innerHTML = html;
+                document.getElementById('leaderboard').classList.remove('hidden');
+                document.getElementById(isAdmin ? 'admin-dashboard' : 'student-dashboard').classList.add('hidden');
+            } catch (err) {
+                alert('Failed to load leaderboard. Please try again.');
+                console.error('Leaderboard error:', err.message);
+            }
+        }
+
+        async function endRoom() {
+            try {
+                const response = await fetch('/end-room', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ roomCode: room.code })
+                });
+                if (!response.ok) throw new Error('Failed to end room');
+                room = null;
+                if (ws) ws.close();
+                window.location.search = '';
+                showLogin();
+            } catch (err) {
+                alert('Failed to end room. Please try again.');
+                console.error('End room error:', err.message);
+            }
+        }
+
+        function backToDashboard() {
+            document.getElementById('leaderboard').classList.add('hidden');
+            document.getElementById(isAdmin ? 'admin-dashboard' : 'student-dashboard').classList.remove('hidden');
+        }
+
+        function showAdminDashboard() {
+            document.getElementById('admin-login').classList.add('hidden');
+            document.getElementById('student-login').classList.add('hidden');
+            document.getElementById('admin-dashboard').classList.remove('hidden');
+            document.getElementById('room-code-display').textContent = `Room Code: ${room.code}`;
+            const shareableUrl = `${window.location.origin}${window.location.pathname}?code=${room.code}`;
+            document.getElementById('shareable-url').value = shareableUrl;
+        }
+
+        function showStudentDashboard() {
+            document.getElementById('admin-login').classList.add('hidden');
+            document.getElementById('student-login').classList.add('hidden');
+            document.getElementById('student-dashboard').classList.remove('hidden');
+            updateStudentDashboard();
+        }
+
+        function showLogin() {
+            document.getElementById('admin-login').classList.remove('hidden');
+            document.getElementById('student-login').classList.remove('hidden');
+            document.getElementById('admin-dashboard').classList.add('hidden');
+            document.getElementById('student-dashboard').classList.add('hidden');
+            document.getElementById('leaderboard').classList.add('hidden');
+            document.getElementById('admin-error').classList.add('hidden');
+            document.getElementById('student-error').classList.add('hidden');
+            document.getElementById('admin-name').value = '';
+            document.getElementById('student-name').value = '';
+            document.getElementById('room-code').value = '';
+        }
+
+        function updateStudentDashboard() {
+            if (!room) {
+                showLogin();
+                return;
+            }
+            const questionEl = document.getElementById('current-question');
+            const answerOptions = document.getElementById('answer-options');
+            const numericAnswer = document.getElementById('numeric-answer');
+            const submitButton = document.getElementById('submit-answer');
+            const imageDisplay = document.getElementById('question-image-display');
+            const answerError = document.getElementById('answer-error');
+
+            if (!room.currentQuestion) {
+                questionEl.textContent = 'No active question';
+                answerOptions.innerHTML = '';
+                imageDisplay.classList.add('hidden');
+                numericAnswer.classList.add('hidden');
+                submitButton.classList.add('hidden');
+                answerError.classList.add('hidden');
+                return;
+            }
+
+            questionEl.textContent = room.currentQuestion.text;
+            if (room.currentQuestion.image) {
+                imageDisplay.src = room.currentQuestion.image;
+                imageDisplay.classList.remove('hidden');
+            } else {
+                imageDisplay.classList.add('hidden');
+            }
+
+            if (room.currentQuestion.type === 'multiple-choice') {
+                answerOptions.innerHTML = room.currentQuestion.options.map(opt => `
+                    <label class="block p-2 bg-white rounded-lg border border-gray-200 hover:bg-gray-50 transition">
+                        <input type="radio" name="answer" value="${opt}" class="mr-2 text-green-600 focus:ring-green-600">${opt}
+                    </label>
+                `).join('');
+                numericAnswer.classList.add('hidden');
+                submitButton.classList.remove('hidden');
+            } else {
+                answerOptions.innerHTML = '';
+                numericAnswer.classList.remove('hidden');
+                submitButton.classList.remove('hidden');
+            }
+            answerError.classList.add('hidden');
+            updateTimerDisplay();
+        }
+
+        // Update correct answer options on input change
+        document.getElementById('option1').addEventListener('input', updateCorrectAnswerOptions);
+        document.getElementById('option2').addEventListener('input', updateCorrectAnswerOptions);
+        document.getElementById('option3').addEventListener('input', updateCorrectAnswerOptions);
+        document.getElementById('option4').addEventListener('input', updateCorrectAnswerOptions);
+
+        window.onload = () => {
+            const urlParams = new URLSearchParams(window.location.search);
+            const roomCode = urlParams.get('code');
+            if (roomCode) {
+                document.getElementById('room-code').value = roomCode.toUpperCase();
+            }
+        };
+    </script>
+</body>
+</html>
